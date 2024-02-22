@@ -1,0 +1,276 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(readxl)
+library(tidyverse)
+# For GO enrichment analysis
+library(clusterProfiler)
+# gene ids
+library(org.Hs.eg.db)
+```
+
+### Concurrent
+
+conc_t1 =\> At most one family among the ten neighbouring families has overlapping confidence interval:
+
+```{r}
+conc_t1 <- readxl::read_excel("../concurrent_overview.xlsx",col_names = FALSE)
+```
+
+Removing some of the extra columns and naming some empty columns
+
+```{r}
+conc_t1[1,1] <- "State"
+conc_t1[2,1] <- "Cancer"
+conc_t1[3,1] <- "Patient"
+conc_t1 <- conc_t1[,-c(101:102)]
+conc_t1 <- as.data.frame(t(conc_t1))
+```
+
+Summation of exclusive families in different datasets
+
+```{r}
+colnames(conc_t1) <- conc_t1[1,]
+intermediate_aggregation_t1 <- conc_t1 %>% 
+  filter(!row_number() %in% c(1, 2)) %>%
+  dplyr::select(-c(Patient,Dataset)) %>%
+  group_by(State,Cancer) %>%
+  mutate_if(is.character, as.numeric) %>%
+  summarise(across(where(is.numeric), sum))
+```
+
+Done like this because Head and Neck cancer metastasis are also included with the cancer patients, and are not excluded in getting the common families
+
+```{r}
+filtered_t1 <- intermediate_aggregation_t1 %>%
+  filter(State %in% c("Tumour","Lymph node metastasis")) %>%
+  group_by(Cancer) %>%
+  dplyr::select(-State) %>%
+  aggregate(.~Cancer,FUN = sum)
+
+filtered_t1[12,] <- c("Sum",filtered_t1 %>%  summarise(across(where(is.numeric), sum)))
+
+filtered_t1 <- as.data.frame(t(filtered_t1))
+```
+
+```{r}
+colnames(filtered_t1) <- filtered_t1[1,]
+filtered_t1 <- filtered_t1[-1,]
+```
+
+First step is to determine the limit to which family enrichment can be considered
+
+```{r}
+selected_families_t1 <- colSums(sapply(filtered_t1,as.numeric))
+no_of_patients <- c(9,10,1,6,22,6,4,5,6,6,1,76)
+names(no_of_patients) <- names(selected_families_t1)
+```
+
+```{r}
+p_cal <- function(no_of_patients,selected_families,i) {
+  fraction <- selected_families/(1144*no_of_patients)
+  p_for_i <- choose(no_of_patients,i)*(fraction**i)*((1-fraction)**(no_of_patients-i))
+  return(p_for_i)
+}
+
+binomial_p <- function(sel_fam,pat_no,test_no) {
+  i <- seq(test_no,pat_no,1)
+  return(sum(p_cal(pat_no,sel_fam,i))*1144)
+}
+
+binomial_limit <- function(no_of_patients,selected_families) {
+  if (no_of_patients == 1){
+    # need to write it like this (instead of just 2) for cancer identity to show later
+    return(no_of_patients+1)
+  }
+  test_no <- no_of_patients
+  p <- 0
+  while (p<0.05) {
+    i <- seq(test_no,no_of_patients,1)
+    p <- sum(p_cal(no_of_patients,selected_families,i))*1144
+    test_no <- test_no - 1
+  }
+  # test_no + 2 because
+  # test_no was reduced by 1 before the end of the while loop (+1)
+  # test_no was non-significant, implying that test_no+1 was the number of interest for us (+1)
+  return(test_no+2)
+}
+```
+
+```{r}
+filtered_intermediate_t1 <- as.data.frame(sapply(filtered_t1,as.numeric))
+rownames(filtered_intermediate_t1) <- rownames(filtered_t1)
+```
+
+```{r}
+conc_fam_t1 <- list()
+for (i in 1:12){
+ conc_fam_t1[[i]] <- rownames(filtered_intermediate_t1[filtered_intermediate_t1[,i] >= binomial_limit(no_of_patients[i],selected_families_t1[i]),])
+}
+# Set minimum value to 2 so that no single patient datasets contribute to enrichment, since we want to include contributions from all
+```
+
+```{r}
+# For enrichment in each type of cancer considered inclusing overall enrichment
+union_t1 <- filtered_intermediate_t1[Reduce(union,conc_fam_t1),]
+# For enrichment only in overall sum enrichment
+sum_t1 <- filtered_intermediate_t1[conc_fam_t1[[12]],]
+```
+
+```{r}
+union <- filtered_intermediate_t1[Reduce(union,conc_fam_t1),]
+union[union > 0] <- 1
+union <- rowSums(union[-12])
+concurrent_to_select <- names(union[union>2])
+```
+
+### GO
+
+```{r}
+panther <- read.csv("/Users/mondal0000/Documents/clean_pantherhuman.csv")
+gene_id <- as.character(panther[panther$family_id %in% rownames(sum_t1),]$gene_symbol)
+```
+
+getting rid of genes that have 0 expression in total even when all the 76 tumour patients are taken into account
+
+```{r}
+gene_id <- gene_id[! gene_id %in% c('MT1HL1','CLDN34','KLF18','KIR2DL5A','KIR2DL5B','KIR2DS1','KIR2DS2','KIR2DS3','KIR2DS5','KIR3DS1','PRR20G','KIF28P','NANOGP1','ID2B')]
+```
+
+```{r}
+go <- enrichGO(gene_id, keyType = "SYMBOL",'org.Hs.eg.db', ont="ALL",minGSSize = 4,
+  maxGSSize = 5000, pvalueCutoff=1, pAdjustMethod = "BH")
+```
+
+```{r}
+go_df <- go@result
+go_df$GeneRatioNum <- sapply(go_df$GeneRatio, function(x) eval(parse(text=x)))
+go_df$BgRatioNum <- sapply(go_df$BgRatio, function(x) eval(parse(text=x)))
+go_df$Gene_by_Bg <- go_df$GeneRatioNum/go_df$BgRatioNum
+```
+
+```{r}
+go_df$geneID <- strsplit(as.character(go_df$geneID),"/")
+
+for (i in 1:nrow(go_df)){
+  tr <- as.data.frame(go_df$geneID[[i]])
+  colnames(tr) <- "gene_symbol"
+  contribution <- unique(merge(tr,panther)[,"family_id"])
+  go_df$Families[i] <- paste(contribution, collapse = ", ")
+  go_df$NumFamContribution[i] <- length(contribution)
+}
+
+for (i in 1:nrow(go_df)){
+go_df$geneID[i] <- paste(go_df$geneID[[i]],collapse = ", ")
+}
+go_df$geneID <- unlist(go_df$geneID)
+
+write.csv(go_df,"enrichGO_baseOutput_36Families_minusEmptyGene.csv")
+```
+
+```{r}
+go_df$geneID <- strsplit(go_df$geneID,", ")
+go_df <- go_df[(go_df$NumFamContribution>1) & (go_df$p.adjust<0.05) & (go_df$ONTOLOGY=="BP"),]
+```
+
+```{r}
+proportion_matrix <- function(df){
+  sapply(1:length(df$geneID), 
+         function(i1) sapply(1:length(df$geneID),function(i2) length(intersect(df$geneID[[i1]],df$geneID[[i2]]))/length(df$geneID[[i1]])) )
+}
+
+mat_bp_union <- proportion_matrix(go_df)
+colnames(mat_bp_union) <- go_df$Description
+rownames(mat_bp_union) <- go_df$Description
+
+cell_cylce_union <- colnames(mat_bp_union[,mat_bp_union["cell cycle",] > 0.75])
+dna_replication_union <- colnames(mat_bp_union[,mat_bp_union["DNA replication",] > 0.75])
+total_union <- unique(c(cell_cylce_union,dna_replication_union))
+selected_terms_union <- go_df[go_df$Description %in% total_union,]
+```
+
+```{r}
+generic_term_union <- c("regulation of protein","regulation of kinase","microtubule")
+selected_terms_union <- selected_terms_union[!grepl(paste(generic_term_union, collapse='|'), selected_terms_union$Description),]
+```
+
+```{r}
+panther <- read.csv("/Users/mondal0000/Documents/clean_pantherhuman.csv")
+for (i in 1:nrow(selected_terms_union)){
+  tr <- as.data.frame(selected_terms_union$geneID[[i]])
+  colnames(tr) <- "gene_symbol"
+  contribution <- merge(tr,panther)[,"family_name"]
+  selected_terms_union$FamiliesRedundant[i] <- paste(contribution, collapse = ", ")
+}
+```
+
+```{r}
+for (i in 1:nrow(selected_terms_union)){
+selected_terms_union$geneID[i] <- paste(selected_terms_union$geneID[[i]],collapse = ", ")
+}
+selected_terms_union$geneID <- unlist(selected_terms_union$geneID)
+write.csv(selected_terms_union,"Selected_GO_Terms_36Families.csv")
+```
+
+```{r}
+# filtered go
+select_terms <- c("cell cycle","cell division","DNA replication")
+selected_terms_union <- selected_terms_union[match(select_terms,selected_terms_union$Description),]
+```
+
+```{r}
+gene_num <- selected_terms_union %>% separate_rows(FamiliesRedundant, sep = ", ")
+```
+
+```{r}
+cols2 <- c(rep("A",121),rep("B",42),rep("C",21))
+ggplot(gene_num,
+       aes(x = FamiliesRedundant, 
+           y = fct_rev(fct_inorder(str_to_title(Description))),colour = cols2))+
+  geom_count() +  
+  guides(color="none") + 
+  scale_colour_manual(values =c("blue","maroon","orange"))+
+  scale_x_discrete(position = "bottom") +
+  scale_size(range = c(5, 25)) + # Adjust as required.
+  labs(x = NULL, y = NULL,size = "No. of genes", colour = "Super Category") +
+  theme(panel.background = element_rect(colour = "black", fill=NA, size=1),
+        panel.border = element_blank(),
+        axis.text.x = element_text(size = 36, angle = 90),
+        axis.text.y = element_text(size = 24, angle = 90, vjust = 0.5, hjust=0.5),
+        plot.title = element_text(size=40, vjust = 0.5, hjust=0.5),
+        axis.title.x = element_text(size=36),
+        axis.title.y = element_text(size=36),
+        legend.title=element_text(size=30), 
+        legend.text=element_text(size=28),
+        legend.position = "bottom",
+        legend.direction = "vertical",
+        legend.key = element_rect(fill = "transparent", colour = "transparent"))
+```
+
+```{r}
+cols2 <- c(rep("A",121),rep("B",42),rep("C",21))
+ggplot(gene_num,
+       aes(y = str_wrap(FamiliesRedundant,50), 
+           x = fct_rev(fct_inorder(Description)),colour = cols2))+
+  geom_count() +  
+  guides(color="none") + 
+  scale_colour_manual(values =c("blue","maroon","orange"))+
+  scale_x_discrete(position = "top",labels=c('DNA replication','Cell division','Cell cycle')) +
+  scale_size(range = c(5, 40)) + # Adjust as required.
+  labs(x = NULL, y = NULL,size = "No. of genes", colour = "Super Category") +
+  theme(panel.background = element_rect(colour = "black", fill=NA, size=1),
+        panel.border = element_blank(),
+        axis.text.x = element_text(size = 42, vjust = 0.5, hjust=0.5),
+        axis.text.y = element_text(size = 38, vjust = 0.5, hjust=0.5),
+        plot.title = element_text(size=40, vjust = 0.5, hjust=0.5),
+        axis.title.x = element_text(size=36),
+        axis.title.y = element_text(size=36),
+        legend.title=element_text(size=30), 
+        legend.text=element_text(size=28),
+        legend.position = "right",
+        legend.direction = "vertical",
+        legend.key = element_rect(fill = "transparent", colour = "transparent"))
+```

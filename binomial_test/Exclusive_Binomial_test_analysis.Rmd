@@ -1,0 +1,449 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(readxl)
+library(tidyverse)
+# For GO enrichment analysis
+library(clusterProfiler)
+# gene ids
+library(org.Hs.eg.db)
+```
+
+## Exclusive
+
+Loading the overview exclusive excel sheet of interest
+
+```{r}
+exclusive <- readxl::read_excel("overview_exclusive_table.xlsx",col_names = FALSE)
+```
+
+Removing some of the extra columns and naming some empty columns
+
+```{r}
+exclusive[1,1] <- "State"
+exclusive[2,1] <- "Cancer"
+exclusive[3,1] <- "Patient"
+exclusive <- exclusive[,-c(101:102)]
+exclusive <- as.data.frame(t(exclusive))
+```
+
+Summation of exclusive families in different datasets
+
+```{r}
+colnames(exclusive) <- exclusive[1,]
+intermediate_aggregation <- exclusive %>% 
+  filter(!row_number() %in% c(1, 2)) %>%
+  dplyr::select(-c(Patient,Dataset)) %>%
+  group_by(State,Cancer) %>%
+  mutate_if(is.character, as.numeric) %>%
+  summarise(across(where(is.numeric), sum))
+```
+
+Done like this because Head and Neck cancer metastasis are also included with the cancer patients, and are not excluded in getting the common families
+
+```{r}
+filtered <- intermediate_aggregation %>%
+  filter(State %in% c("Tumour","Lymph node metastasis")) %>%
+  group_by(Cancer) %>%
+  dplyr::select(-State) %>%
+  aggregate(.~Cancer,FUN = sum)
+
+filtered[12,] <- c("Sum",filtered %>%  summarise(across(where(is.numeric), sum)))
+
+filtered <- as.data.frame(t(filtered))
+```
+
+```{r}
+colnames(filtered) <- filtered[1,]
+filtered <- filtered[-1,]
+```
+
+First step is to determine the limit to which family enrichment can be considered
+
+```{r}
+selected_families <- colSums(sapply(filtered,as.numeric))
+no_of_patients <- c(9,10,1,6,22,6,4,5,6,6,1,76)
+names(no_of_patients) <- names(selected_families)
+```
+
+```{r}
+p_cal <- function(no_of_patients,selected_families,i) {
+  fraction <- selected_families/(1144*no_of_patients)
+  p_for_i <- choose(no_of_patients,i)*(fraction**i)*((1-fraction)**(no_of_patients-i))
+  return(p_for_i)
+}
+
+binomial_p <- function(sel_fam,pat_no,test_no) {
+  i <- seq(test_no,pat_no,1)
+  return(sum(p_cal(pat_no,sel_fam,i))*1144)
+}
+
+binomial_limit <- function(no_of_patients,selected_families) {
+  if (no_of_patients == 1){
+    # need to write it like this (instead of just 2) for cancer identity to show later
+    return(no_of_patients+1)
+  }
+  test_no <- no_of_patients
+  p <- 0
+  while (p<0.05) {
+    i <- seq(test_no,no_of_patients,1)
+    p <- sum(p_cal(no_of_patients,selected_families,i))*1144
+    test_no <- test_no - 1
+  }
+  # test_no + 2 because
+  # test_no was reduced by 1 before the end of the while loop (+1)
+  # test_no was non-significant, implying that test_no+1 was the number of interest for us (+1)
+  return(test_no+2)
+}
+```
+
+```{r}
+filtered_intermediate <- as.data.frame(sapply(filtered,as.numeric))
+rownames(filtered_intermediate) <- rownames(filtered)
+
+exc_fam <- list()
+for (i in 1:12){
+ exc_fam[[i]] <- rownames(filtered_intermediate[filtered_intermediate[,i] >= binomial_limit(no_of_patients[i],selected_families[i]),])
+}
+```
+
+```{r}
+union <- filtered_intermediate[Reduce(union,exc_fam),]
+write.csv(union,"exclusive_enriched_families_union_all_datasets.csv")
+```
+
+### Family name Heatmap
+
+```{r}
+panther <- read.csv("/Users/mondal0000/Documents/clean_pantherhuman.csv")
+panther <- panther[,c(4,6)] %>% unique
+colnames(panther)[which(names(panther) == "family_id")] <- "Families"
+famnames <- panther[panther$Families %in% rownames(union),]
+famnames <- famnames[match(rownames(union),famnames$Families),]
+famnames$Families <- paste0("(", famnames$Families, ")")
+famnames$Families <- gsub("PTHR","",famnames$Families)
+famnames$combined <- paste0(famnames$family_name," ",famnames$Families)
+row.names(union) <- famnames$combined
+```
+
+```{r}
+library(ComplexHeatmap)
+library(colorRamp2)
+num_fam <- exclusive %>%
+  group_by(State) %>%
+  filter(State %in% c("Tumour","Lymph node metastasis")) %>%
+  .$Cancer %>%
+  table
+relative_freq <- as.data.frame(t(t(union[,1:11])/as.vector(num_fam)))
+relative_freq <- as.matrix(relative_freq)
+col_fun = colorRamp2(c(0, 1), c("white", "red"))
+Heatmap(relative_freq,
+        column_names_max_height = unit(12,"cm"),
+        row_names_max_width = unit(14,"cm"),
+        name = "Proportion",
+        col = col_fun)
+```
+
+```{r}
+union <- filtered_intermediate[Reduce(union,exc_fam),]
+union[union > 0] <- 1
+union <- rowSums(union[-12])
+exclusive_to_select <- names(union[union>2])
+```
+
+## GO
+
+```{r}
+panther <- read.csv("/Users/mondal0000/Documents/clean_pantherhuman.csv")
+gene_id <- as.character(panther[panther$family_id %in% exclusive_to_select,]$gene_symbol)
+```
+
+getting rid of genes that have 0 expression in total even when all the 76 tumour patients are taken into account
+
+```{r}
+gene_id <- gene_id[! gene_id %in% c('OPN1MW3')]
+```
+
+```{r}
+go <- enrichGO(gene_id, keyType = "SYMBOL",'org.Hs.eg.db', ont="ALL",minGSSize = 4,
+  maxGSSize = 5000, pvalueCutoff=1, pAdjustMethod = "BH")
+```
+
+```{r}
+go_df <- go@result
+go_df$GeneRatioNum <- sapply(go_df$GeneRatio, function(x) eval(parse(text=x)))
+go_df$BgRatioNum <- sapply(go_df$BgRatio, function(x) eval(parse(text=x)))
+go_df$Gene_by_Bg <- go_df$GeneRatioNum/go_df$BgRatioNum
+```
+
+```{r}
+go_df$geneID <- strsplit(as.character(go_df$geneID),"/")
+
+for (i in 1:nrow(go_df)){
+  tr <- as.data.frame(go_df$geneID[[i]])
+  colnames(tr) <- "gene_symbol"
+  contribution <- unique(merge(tr,panther)[,"family_id"])
+  go_df$Families[i] <- paste(contribution, collapse = ", ")
+  go_df$NumFamContribution[i] <- length(contribution)
+}
+
+for (i in 1:nrow(go_df)){
+go_df$geneID[i] <- paste(go_df$geneID[[i]],collapse = ", ")
+}
+go_df$geneID <- unlist(go_df$geneID)
+
+write.csv(go_df,"enrichGO_baseOutput_9Families_minusEmptyGene.csv")
+```
+
+```{r}
+go_df$geneID <- strsplit(go_df$geneID,", ")
+go_df <- go_df[(go_df$NumFamContribution>1) & (go_df$p.adjust<0.05) & (go_df$ONTOLOGY=="BP") & (go_df$Count > 20),]
+```
+
+```{r}
+proportion_matrix <- function(df){
+  sapply(1:length(df$geneID), 
+         function(i1) sapply(1:length(df$geneID),function(i2) length(intersect(df$geneID[[i1]],df$geneID[[i2]]))/length(df$geneID[[i1]])) )
+}
+```
+
+```{r}
+mat_go_df <- proportion_matrix(go_df)
+colnames(mat_go_df) <- go_df$Description
+rownames(mat_go_df) <- go_df$Description
+write.csv(mat_go_df,"Similarity_Matrix_BP_9Families.csv")
+```
+
+### Bubble Plot with \# of genes contributing to family
+
+```{r}
+# filtered go
+select_terms <- c("transport","metal ion transport","transmembrane transport","multicellular organism development","cell differentiation","cell migration","regulation of cell population proliferation")
+go_df <- go_df[match(select_terms,go_df$Description),]
+```
+
+```{r}
+panther <- read.csv("/Users/mondal0000/Documents/clean_pantherhuman.csv")
+for (i in 1:nrow(go_df)){
+  tr <- as.data.frame(go_df$geneID[[i]])
+  colnames(tr) <- "gene_symbol"
+  contribution <- merge(tr,panther)[,"family_name"]
+  go_df$FamiliesRedundant[i] <- paste(contribution, collapse = ", ")
+}
+```
+
+```{r}
+gene_num <- go_df %>% separate_rows(FamiliesRedundant, sep = ", ")
+```
+
+```{r}
+cols2 <- c(rep("A",98),rep("B",29),rep("C",68))
+ggplot(gene_num,
+       aes(x = stringr::str_wrap(str_to_sentence(FamiliesRedundant),20), 
+           y = fct_rev(fct_inorder(stringr::str_wrap(str_to_sentence(Description),20))),colour = cols2))+
+  geom_count() +  
+  guides(color="none") + 
+  scale_colour_manual(values =c("blue","pink","red"))+
+  scale_x_discrete(position = "bottom") +
+  scale_size_continuous(range = c(5, 30)) + # Adjust as required.
+  labs(x = NULL, y = NULL,size = "No. of genes", colour = "Super Category") +
+  theme(panel.background = element_rect(colour = "black", fill=NA, size=1),
+        panel.border = element_blank(),
+        legend.position = "right",
+        axis.text.x = element_text(size = 23, vjust = 0.5, hjust=0.5, angle = 45),
+        axis.text.y = element_text(size = 30, vjust = 0.5, hjust=0.5,face = c('plain', 'plain','bold','bold','plain','plain','bold')),
+        plot.title = element_text(size=20, vjust = 0.5, hjust=0.5),
+        axis.title.x = element_text(size=18),
+        axis.title.y = element_text(size=18),
+        legend.title=element_text(size=20), 
+        legend.text=element_text(size=18),
+        legend.key = element_rect(fill = "transparent", colour = "transparent"))
+# element_rect(colour = "black", fill=NA, size=1)
+```
+
+### Alternate Bubble Plots
+
+```{r}
+cols2 <- c(rep("A",98),rep("B",29),rep("C",68))
+ggplot(gene_num,
+       aes(y = str_to_sentence(FamiliesRedundant),
+           x = fct_rev(fct_inorder((stringr::str_wrap(str_to_sentence(Description),20)))),colour = cols2))+
+  geom_count() +  
+  guides(color="none") + 
+  scale_colour_manual(values =c("blue","pink","red"))+
+  scale_x_discrete(position = "bottom") +
+  scale_size_continuous(range = c(5, 30)) + # Adjust as required.
+  labs(x = NULL, y = NULL,size = "No. of genes", colour = "Super Category") +
+  theme(panel.background = element_rect(colour = "black", fill=NA, size=1),
+        panel.border = element_blank(),
+        legend.position = "right",
+        axis.text.y = element_text(size = 30, vjust = 0.5, hjust=0.5),
+        axis.text.x = element_text(size = 22, vjust = 0.5, hjust=0.5,face = c('plain', 'plain','bold','bold','plain','plain','bold'), angle = 45),
+        plot.title = element_text(size=20, vjust = 0.5, hjust=0.5),
+        axis.title.x = element_text(size=18),
+        axis.title.y = element_text(size=18),
+        legend.title=element_text(size=15), 
+        legend.text=element_text(size=14),
+        legend.key = element_rect(fill = "transparent", colour = "transparent"),
+        axis.ticks = element_blank())
+```
+
+```{r}
+go_df_alt <- go_df[,1:15]
+for (i in 1:nrow(go_df_alt)){
+  tr <- as.data.frame(go_df_alt$geneID[[i]])
+  colnames(tr) <- "gene_symbol"
+  contribution <- merge(tr,panther)[,"family_id"]
+  go_df_alt$FamiliesRedundant[i] <- paste(contribution, collapse = ", ")
+}
+gene_num_alt <- go_df_alt %>% separate_rows(FamiliesRedundant, sep = ", ")
+```
+
+```{r}
+cols2 <- c(rep("A",98),rep("B",29),rep("C",68))
+ggplot(gene_num_alt,
+       aes(x = stringr::str_wrap(FamiliesRedundant,20), 
+           y = fct_rev(fct_inorder(str_to_sentence(Description))),colour = cols2))+
+  geom_count() +  
+  guides(color="none") + 
+  scale_colour_manual(values =c("blue","pink","red"))+
+  scale_x_discrete(position = "bottom") +
+  scale_size_continuous(range = c(5, 30)) + # Adjust as required.
+  labs(x = NULL, y = NULL,size = "No. of genes", colour = "Super Category") +
+  theme(panel.background = element_rect(colour = "black", fill=NA, size=1),
+        panel.border = element_blank(),
+        legend.position = "right",
+        axis.text.x = element_text(size = 28,vjust = 0.5, hjust=0.5,angle = 45),
+        axis.text.y = element_text(size = 30, vjust = 0.5, hjust=0.5,face = c('plain', 'plain','bold','bold','plain','plain','bold')),
+        plot.title = element_text(size=20, vjust = 0.5, hjust=0.5),
+        axis.title.x = element_text(size=18),
+        axis.title.y = element_text(size=18),
+        legend.title=element_text(size=18), 
+        legend.text=element_text(size=18),
+        legend.key = element_rect(fill = "transparent", colour = "transparent"),
+        axis.ticks = element_blank())
+```
+
+```{r}
+panther <- read.csv("/Users/mondal0000/Documents/clean_pantherhuman.csv")
+for (i in 1:nrow(go_df)){
+  tr <- as.data.frame(go_df$geneID[[i]])
+  colnames(tr) <- "gene_symbol"
+  contribution <- merge(tr,panther)[,"family_name"]
+  go_df$FamiliesRedundant[i] <- paste(contribution, collapse = ", ")
+}
+gene_num <- go_df %>% separate_rows(FamiliesRedundant, sep = ", ")
+```
+
+```{r}
+gene_num_abbrev <- gene_num
+gene_num_abbrev[gene_num_abbrev == "MULTIPLE EPIDERMAL GROWTH FACTOR-LIKE DOMAINS PROTEIN"] <- "MEGF-like domains protein"
+gene_num_abbrev[gene_num_abbrev == "FIBROBLAST GROWTH FACTOR"] <- "Fibroblast growth factor"
+gene_num_abbrev[gene_num_abbrev == "MYELIN TRANSCRIPTION FACTOR 1-RELATED"] <- "MyT1-related"
+gene_num_abbrev[gene_num_abbrev == "CALCIUM-ACTIVATED POTASSIUM CHANNEL SUBUNIT BETA"] <- bquote("K[Ca] subunit β")
+gene_num_abbrev[gene_num_abbrev == "SMALL CONDUCTANCE CALCIUM-ACTIVATED POTASSIUM CHANNEL"] <- "small conductance K[Ca]"
+gene_num_abbrev[gene_num_abbrev == "T-CELL LYMPHOMA BREAKPOINT-ASSOCIATED TARGET 1-RELATED"] <- "TCBA target 1-related"
+gene_num_abbrev[gene_num_abbrev == "SOLUTE CARRIER FAMILY 5"] <- "SLC5"
+gene_num_abbrev[gene_num_abbrev == "SODIUM/POTASSIUM/CALCIUM EXCHANGER"] <- "Na/K/Ca Exchanger"
+gene_num_abbrev[gene_num_abbrev == "OPSIN"] <- "Opsin"
+
+gene_num_abbrev <- gene_num_abbrev %>% mutate(FamiliesRedundant=gsub(" ", "~", FamiliesRedundant))
+```
+
+```{r}
+cols2 <- c(rep("A",98),rep("B",29),rep("C",68))
+ggplot(gene_num_abbrev,
+       aes(x = str_to_sentence(FamiliesRedundant), 
+           y = fct_rev(fct_inorder(stringr::str_wrap(str_to_sentence(Description),20))),colour = cols2))+
+  geom_count() +  
+  guides(color="none") + 
+  scale_colour_manual(values =c("blue","pink","red"))+
+  scale_x_discrete(position = "bottom",labels=parse(text=sort(unique(gene_num_abbrev$FamiliesRedundant))))+ # Because of this, it is no longer 
+  scale_size_continuous(range = c(5, 30)) + # Adjust as required.
+  labs(x = NULL, y = NULL,size = "No. of genes", colour = "Super Category") +
+  theme(panel.background = element_rect(colour = "black", fill=NA, size=1),
+        panel.border = element_blank(),
+        legend.position = "right",
+        axis.text.x = element_text(size = 30, vjust = 0.5, hjust=0.5, angle=45),
+        axis.text.y = element_text(size = 30, vjust = 0.5, hjust=0.5,face = c('plain', 'plain','bold','bold','plain','plain','bold')),
+        plot.title = element_text(size=20, vjust = 0.5, hjust=0.5),
+        axis.title.x = element_text(size=18),
+        axis.title.y = element_text(size=18),
+        legend.title=element_text(size=18), 
+        legend.text=element_text(size=18),
+        legend.key = element_rect(fill = "transparent", colour = "transparent"),
+        axis.ticks = element_blank())
+```
+
+#### With shortened descriptions for two GO terms
+
+```{r}
+gene_num[gene_num == "multicellular organism development"] <- "Multi. organism dev."
+gene_num[gene_num == "regulation of cell population proliferation"] <- "Reg. of cell pop. proliferation"
+
+gene_num_alt[gene_num_alt == "multicellular organism development"] <- "Multi. organism dev."
+gene_num_alt[gene_num_alt == "regulation of cell population proliferation"] <- "Reg. of cell pop. proliferation"
+
+gene_num_abbrev[gene_num_abbrev == "multicellular organism development"] <- "Multi. organism dev."
+gene_num_abbrev[gene_num_abbrev == "regulation of cell population proliferation"] <- "Reg. of cell pop. proliferation"
+```
+
+```{r}
+cols2 <- c(rep("A",98),rep("B",29),rep("C",68))
+ggplot(gene_num,
+       aes(y = FamiliesRedundant,
+           x = fct_rev(fct_inorder(str_to_sentence((stringr::str_wrap(Description,20))))),colour = cols2))+
+  geom_count() +  
+  guides(color="none") + 
+  scale_colour_manual(values =c("blue","pink","red"))+
+  scale_x_discrete(position = "bottom") +
+  scale_size_continuous(range = c(5, 30)) + # Adjust as required.
+  labs(x = NULL, y = NULL,size = "No. of genes", colour = "Super Category") +
+  theme(legend.position = "right",
+        axis.text.y = element_text(size = 14),
+        axis.text.x = element_text(size = 20,face = c('plain', 'plain','bold','bold','plain','plain','bold'), angle = 45),
+        panel.background = element_blank(),
+        panel.grid = element_blank(),
+        axis.ticks = element_blank())
+```
+
+```{r}
+cols2 <- c(rep("A",98),rep("B",29),rep("C",68))
+ggplot(gene_num_alt,
+       aes(x = stringr::str_wrap(FamiliesRedundant,20), 
+           y = fct_rev(fct_inorder(str_to_sentence(Description))),colour = cols2))+
+  geom_count() +  
+  guides(color="none") + 
+  scale_colour_manual(values =c("blue","pink","red"))+
+  scale_x_discrete(position = "bottom") +
+  scale_size_continuous(range = c(5, 30)) + # Adjust as required.
+  labs(x = NULL, y = NULL,size = "No. of genes", colour = "Super Category") +
+  theme(legend.position = "right",
+        axis.text.x = element_text(size = 14),
+        axis.text.y = element_text(size = 24,face = c('plain', 'plain','bold','bold','plain','plain','bold')), ,
+        panel.background = element_blank(),
+        panel.grid = element_blank(),
+        axis.ticks = element_blank())
+```
+
+```{r}
+cols2 <- c(rep("A",98),rep("B",29),rep("C",68))
+ggplot(gene_num_abbrev,
+       aes(x = stringr::str_wrap(FamiliesRedundant,20), 
+           y = fct_rev(fct_inorder(str_to_sentence(Description))),colour = cols2))+
+  geom_count() +  
+  guides(color="none") + 
+  scale_colour_manual(values =c("blue","pink","red"))+
+  scale_x_discrete(position = "bottom",labels=parse(text=sort(unique(gene_num_abbrev$FamiliesRedundant))))+ # Because of this, it is no longer 
+  scale_size_continuous(range = c(5, 30)) + # Adjust as required.
+  labs(x = NULL, y = NULL,size = "No. of genes", colour = "Super Category") +
+  theme(legend.position = "right",
+        axis.text.x = element_text(size = 18, angle = 45),
+        axis.text.y = element_text(size = 24,face = c('plain', 'plain','bold','bold','plain','plain','bold')), ,
+        panel.background = element_blank(),
+        panel.grid = element_blank(),
+        axis.ticks = element_blank())
+```
