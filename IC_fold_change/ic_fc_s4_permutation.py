@@ -55,11 +55,12 @@ def p_calculation(fc_perm):
     return pd.DataFrame(l)
 
 permutations = 100000
-h_dich = pd.read_csv("../Differential_Expression/dichotomised/s4_periphery.csv",index_col="gene_id")
-t_dich = pd.read_csv("../Differential_Expression/dichotomised/s4_tumour.csv",index_col="gene_id")
-familyset = pd.read_csv("../Differential_Expression/familyset/s4_periphery.csv",
+h_dich = pd.read_csv("s4_periphery/dichotomised_genes.csv",index_col="gene_id")
+t_dich = pd.read_csv("s4_tumour/dichotomised_genes.csv",index_col="gene_id")
+# familyset of both the tumour/periphery is identical
+familyset = pd.read_csv("s4_periphery/familyset.csv",
                         usecols=["gene_id", "family_id"],index_col="gene_id")
-family_name = pd.read_csv("../clean_pantherhuman.csv")[["family_id","family_name"]].drop_duplicates().set_index("family_id")
+family_name = pd.read_csv("clean_pantherhuman.csv")[["family_id","family_name"]].drop_duplicates().set_index("family_id")
 family_list = list(familyset["family_id"].drop_duplicates())
 h_IC = family_filtering_with_ic_calculation(h_dich)
 t_IC = family_filtering_with_ic_calculation(t_dich)
@@ -78,6 +79,5 @@ if __name__ == "__main__":
     p_df = p_calculation(fc_perm)
     p_df.set_index("family_id",inplace=True)
     p_df["holm_corrected_ic_fc_p"] = statsmodels.stats.multitest.multipletests(p_df["ic_fc_p"],alpha=0.05,method="holm",is_sorted=False)[1]
-    p_df["bh_corrected_ic_fc_p"] = statsmodels.stats.multitest.multipletests(p_df["ic_fc_p"],alpha=0.05,method="fdr_bh",is_sorted=False)[1]
     family_name = family_name.loc[filtered_families]
     pd.concat([p_df,family_name],axis=1).to_csv("ic_fc_s4.csv")

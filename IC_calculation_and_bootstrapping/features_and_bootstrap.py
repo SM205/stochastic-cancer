@@ -24,9 +24,9 @@ def bootstrap_IC(genes, bootstrap_n = 10000):
         "upper": np.nanquantile(ics, q=0.975),
     })
 
-family_genes = pd.read_csv("clean_pantherhuman/intermediate/familyset.csv",index_col='gene_id')
-family_df = pd.read_csv("/home/mondal0000/Desktop/Stochastic/clean_pantherhuman.csv")
-dich = pd.read_csv("clean_pantherhuman/intermediate/dichotomised_genes.csv",index_col='gene_id')
+family_genes = pd.read_csv("familyset.csv",index_col='gene_id')
+family_df = pd.read_csv("clean_pantherhuman.csv")
+dich = pd.read_csv("dichotomised_genes.csv",index_col='gene_id')
 l = []
 fam_list = set(family_genes["family_id"])
 for family in fam_list:
@@ -37,6 +37,7 @@ for family in fam_list:
     dic['family_id'] = family
     dic['mean_gene_per_cell'] = exp_per_cell.mean()
     dic['std_gene_per_cell'] = exp_per_cell.std()
+    dic['original_IC'] = get_IC(get_observed_variance(genes),get_pb_variance(genes))
     dic['no_genes_total'] = family_df.loc[family_df.family_id == family].shape[0]
     dic['no_genes_measured'] = len(dich.loc[genes.index].dropna())
     dic['non_zero_genes'] = (dich.loc[genes.index].dropna().sum(axis=1)>0).sum()
@@ -52,5 +53,4 @@ for family in fam_list:
     l.append(dic)
 results = pd.DataFrame(l)
 results.set_index("family_id",inplace=True)
-results.to_csv("Final_IC_bootstrap.csv")
 results.to_excel("Final_IC_bootstrap.xlsx")

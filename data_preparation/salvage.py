@@ -5,5 +5,5 @@ def salvage(df):
         del df[(df>0).sum().sort_values().index[0]]
     return df
 
-e3 = pd.read_csv("filtered_EC3.csv",index_col="gene_id")
-salvage(e3).to_csv("salvaged_EC3.csv")
+sample = pd.read_csv("filtered_sample.csv",index_col="gene_id")
+salvage(sample).to_csv("salvaged_sample.csv")

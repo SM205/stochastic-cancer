@@ -5,8 +5,8 @@ import random
 from scipy.stats import mannwhitneyu
 
 random.seed(205)
-s4h = pd.read_csv("../../Differential_Expression/True_nonzero/tmm_s4_periphery.csv",index_col="Unnamed: 0")
-s4t = pd.read_csv("../../Differential_Expression/True_nonzero/tmm_s4_tumour.csv",index_col="Unnamed: 0")
+s4h = pd.read_csv("tmm_s4_periphery.csv",index_col="Unnamed: 0")
+s4t = pd.read_csv("tmm_s4_tumour.csv",index_col="Unnamed: 0")
 s4 = s4h.join(s4t)
 perm = 10000
 healthy_perm = [None]*perm

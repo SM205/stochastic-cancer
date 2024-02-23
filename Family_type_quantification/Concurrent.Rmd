@@ -1,0 +1,76 @@
+---
+title: "Concurrent Classification"
+output: html_notebook
+---
+
+```{r}
+library(readxl)
+library(tidyverse)
+```
+
+```{r}
+panther <- read_csv("clean_pantherhuman.csv")
+families <- panther[,c(4,6)]
+fams_4_or_more <- families %>% 
+  group_by_all() %>% 
+  count %>% 
+  filter(n > 3) %>% 
+  select(2,1)
+```
+
+```{r}
+overview_exclusive <- readxl::read_excel("overview_exclusive_table.xlsx",col_names = FALSE)
+dataset_details <-paste0("Dataset_folder/",overview_exclusive[4,3:(ncol(overview_exclusive)-2)],"/Bootstrap/",overview_exclusive[3,3:(ncol(overview_exclusive)-2)],"/Final_IC_bootstrap.xlsx")
+concurrent_overview <- fams_4_or_more
+concurrent_overview <- concurrent_overview %>% ungroup
+```
+
+### Function for Concurrent classification
+
+```{r}
+concurrent <- function(dataset){
+  conc_rows <- c()
+  for (i in c(1:5)){
+  if(dataset[i,]$lower > 1){
+    neighbouring <- dataset[c(1:11)[-i],]$upper
+    if(sum(dataset[i,]$lower>neighbouring)>8){#first five
+      conc_rows <- append(conc_rows,i)
+    }
+  }
+  }
+  for (i in c(6:(nrow(dataset)-5))){
+  if((dataset[i,]$lower > 1)){
+    neighbouring <- dataset[c((i-5):(i+5))[-6],]$upper
+    if(sum(dataset[i,]$lower>neighbouring)>8){#families not in the extremes
+      conc_rows <- append(conc_rows,i)
+    }
+  }
+  }
+  return(dataset[conc_rows,])
+}
+```
+
+```{r}
+for(t in c(1:98)){
+  dataset <- readxl::read_excel(dataset_details[t])
+  dataset <- dataset[(dataset$mean_gene_per_cell > 0.1) & (dataset$non_zero_genes > 3),]
+  dataset <- dataset %>% arrange(mean_gene_per_cell) %>% drop_na()
+  conc_dich <- as.numeric(fams_4_or_more$family_id %in% concurrent(dataset)$family_id)
+  concurrent_overview <- concurrent_overview %>% mutate(new = conc_dich)
+  colnames(concurrent_overview)[colnames(concurrent_overview) == "new"] <- paste0("sample",t)
+}
+```
+
+drop_na was necessary because in HeLa WT, the expression of all chaperonin genes was present in every cell, so, completely consistent expression.
+
+```{r}
+names(concurrent_overview)[1:100] <- as.vector(unlist(overview_exclusive[4,1:100]))
+```
+
+```{r}
+concurrent_overview <- concurrent_overview[(rowSums(concurrent_overview[,3:100]) > 0),]
+```
+
+```{r}
+write.csv(concurrent_overview,"concurrent_overview_table.csv")
+```

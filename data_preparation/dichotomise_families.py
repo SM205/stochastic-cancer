@@ -56,6 +56,8 @@ def get_threshold(genes):
         return _fm05(genes)
     elif dich_type == "one":
         return 1.0
+    elif dich_type == "onehalf":
+        return 0.5
     else:
         raise Exception("Unknown dichotomisation type")
 

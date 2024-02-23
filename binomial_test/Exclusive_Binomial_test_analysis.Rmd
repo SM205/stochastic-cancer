@@ -118,7 +118,7 @@ write.csv(union,"exclusive_enriched_families_union_all_datasets.csv")
 ### Family name Heatmap
 
 ```{r}
-panther <- read.csv("/Users/mondal0000/Documents/clean_pantherhuman.csv")
+panther <- read.csv("clean_pantherhuman.csv")
 panther <- panther[,c(4,6)] %>% unique
 colnames(panther)[which(names(panther) == "family_id")] <- "Families"
 famnames <- panther[panther$Families %in% rownames(union),]
@@ -157,7 +157,7 @@ exclusive_to_select <- names(union[union>2])
 ## GO
 
 ```{r}
-panther <- read.csv("/Users/mondal0000/Documents/clean_pantherhuman.csv")
+panther <- read.csv("clean_pantherhuman.csv")
 gene_id <- as.character(panther[panther$family_id %in% exclusive_to_select,]$gene_symbol)
 ```
 
@@ -226,7 +226,7 @@ go_df <- go_df[match(select_terms,go_df$Description),]
 ```
 
 ```{r}
-panther <- read.csv("/Users/mondal0000/Documents/clean_pantherhuman.csv")
+panther <- read.csv("clean_pantherhuman.csv")
 for (i in 1:nrow(go_df)){
   tr <- as.data.frame(go_df$geneID[[i]])
   colnames(tr) <- "gene_symbol"
@@ -328,7 +328,7 @@ ggplot(gene_num_alt,
 ```
 
 ```{r}
-panther <- read.csv("/Users/mondal0000/Documents/clean_pantherhuman.csv")
+panther <- read.csv("clean_pantherhuman.csv")
 for (i in 1:nrow(go_df)){
   tr <- as.data.frame(go_df$geneID[[i]])
   colnames(tr) <- "gene_symbol"

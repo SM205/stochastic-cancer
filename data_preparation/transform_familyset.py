@@ -39,7 +39,7 @@ for i, N in tqdm(fam_counts.iteritems()):
 #     df.loc[df.family_rm_sub == i, "N"] = N
 
 #%% Drop families smaller then 5
-df = df[df.N >= 5]
+#df = df[df.N >= 5]
 
 #%%
 df.columns = ["gene_id", "family_id", "N"]

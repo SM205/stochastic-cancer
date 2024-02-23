@@ -1,0 +1,86 @@
+---
+title: "TMM normalisation"
+output: html_notebook
+---
+
+```{r}
+library("edgeR")
+```
+
+### Loading in the required raw files
+
+```{r}
+tpm_s2_periphery <- read.csv("s2_periphery.csv", row.names=1)
+colnames(tpm_s2_periphery) <- paste(colnames(tpm_s2_periphery), "periphery", sep = "_")
+tpm_s2_tumour <- read.csv("s2_tumour.csv", row.names=1)
+colnames(tpm_s2_tumour) <- paste(colnames(tpm_s2_tumour), "tumour", sep = "_")
+tpm_s4_periphery <- read.csv("s4_periphery.csv", row.names=1)
+colnames(tpm_s4_periphery) <- paste(colnames(tpm_s4_periphery), "periphery", sep = "_")
+tpm_s4_tumour <- read.csv("s4_tumour.csv", row.names=1)
+colnames(tpm_s4_tumour) <- paste(colnames(tpm_s4_tumour), "tumour", sep = "_")
+```
+
+## To keep only non-zero genes
+
+1)  Here, we're filtering out any genes that have zero values in any of the conditions.
+
+2)  After that, we perform an intersection of the set of genes for proper DE analysis for the four different DE possible.
+
+**NOTE:** It wasn't performed earlier but after discrepancy in chi-square test of independence results, while reducing the criteria for wilcoxon, it was discovered that it would be more appropriate to get rid of zero genes in both DE analyses and it turned out to be the correct decision based on p-value histogram of previous vs current edgeR DE.
+
+Also, even with this less stringent criteria, the number of genes is in a similar range to even TPM \> 10 (for at least one cell) criteria
+
+```{r}
+tpm_s2_select_periphery <- tpm_s2_periphery[apply(tpm_s2_periphery>0,1,any,na.rm=TRUE),]
+tpm_s2_select_tumour <- tpm_s2_tumour[apply(tpm_s2_tumour>0,1,any,na.rm=TRUE),]
+tpm_s4_select_periphery <- tpm_s4_periphery[apply(tpm_s4_periphery>0,1,any,na.rm=TRUE),]
+tpm_s4_select_tumour <- tpm_s4_tumour[apply(tpm_s4_tumour>0,1,any,na.rm=TRUE),]
+
+# Intersection of the various sets of DE calculations to be performed
+# Order of executions is important since the last 2 code blocks overwrite the dataframe that is used by the first 2 blocks
+# The first 2 blocks are for DE between patients with same pathology and the last 2 are for DE between pathology in same patient
+tpm_tumour_s2 <- tpm_s2_tumour[union(rownames(tpm_s2_select_tumour),rownames(tpm_s4_select_tumour)),]
+tpm_periphery_s2 <- tpm_s2_periphery[union(rownames(tpm_s2_select_periphery),rownames(tpm_s4_select_periphery)),]
+
+tpm_tumour_s4 <- tpm_s4_tumour[union(rownames(tpm_s4_select_tumour),rownames(tpm_s2_select_tumour)),]
+tpm_periphery_s4 <- tpm_s4_periphery[union(rownames(tpm_s4_select_periphery),rownames(tpm_s2_select_periphery)),]
+
+tpm_s2_periphery <- tpm_s2_periphery[union(rownames(tpm_s2_select_periphery),rownames(tpm_s2_select_tumour)),]
+tpm_s2_tumour <- tpm_s2_tumour[union(rownames(tpm_s2_select_periphery),rownames(tpm_s2_select_tumour)),]
+
+tpm_s4_periphery <- tpm_s4_periphery[union(rownames(tpm_s4_select_periphery),rownames(tpm_s4_select_tumour)),]
+tpm_s4_tumour <- tpm_s4_tumour[union(rownames(tpm_s4_select_periphery),rownames(tpm_s4_select_tumour)),]
+```
+
+```{r}
+tpm_s2 <- cbind(tpm_s2_periphery,tpm_s2_tumour)
+tpm_s4 <- cbind(tpm_s4_periphery,tpm_s4_tumour)
+```
+
+```{r}
+tmm_factor_s2 <- edgeR::calcNormFactors(tpm_s2)
+tpmtmm_s2 <- edgeR::cpm(tpm_s2, lib.size = tmm_factor_s2 * colSums(tpm_s2))
+
+tmm_factor_s4 <- edgeR::calcNormFactors(tpm_s4)
+tpmtmm_s4 <- edgeR::cpm(tpm_s4, lib.size = tmm_factor_s4 * colSums(tpm_s4))
+
+
+# the below command needed for t-test
+#logtpm_s2 <- log2(tpmtmm_s2 + 1)
+#logtpm_s4 <- log2(tpmtmm_s4 + 1)
+```
+
+```{r}
+tmm_s2_periphery <- tpmtmm_s2[,1:233]
+tmm_s2_tumour <- tpmtmm_s2[,234:725]
+
+tmm_s4_periphery <- tpmtmm_s4[,1:233]
+tmm_s4_tumour <- tpmtmm_s4[,234:364]
+```
+
+```{r}
+write.csv(tmm_s2_periphery,"tmm_s2_periphery.csv")
+write.csv(tmm_s2_tumour,"tmm_s2_tumour.csv")
+write.csv(tmm_s4_periphery,"tmm_s4_periphery.csv")
+write.csv(tmm_s4_tumour,"tmm_s4_tumour.csv")
+```

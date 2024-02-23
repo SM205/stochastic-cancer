@@ -3,11 +3,19 @@ import pandas as pd
 import scanpy as sc
 import marker_utils
 
-path = "/Users/mondal0000/Documents/CellMarkerDB_V2/GSE99330/*.csv"
+path = study_accession/*.csv #path to folder containing sample files in csv format
 
-cell_markers = pd.read_excel('/Users/mondal0000/Documents/CellMarkerDB_V2/Marker_Data/Cell_marker_Human.xlsx')
-markers = marker_utils.cell_type(cell_markers,"Cancer cell")
-markers = marker_utils.cancer_type(markers,"Melanoma")
+cell_markers = pd.read_excel('Cell_marker_Human.xlsx')
+markers = marker_utils.cell_type(cell_markers,Cell Type)
+# usually only one of the two types below will be used
+# In certain studies with multiple criteria, another step is added
+# Example given below
+# markers_1 = markers[markers['cancer_type'].str.contains("Triple-Negative Breast Cancer")]
+# markers_2 = markers[markers['cancer_type'].str.contains("Triple-negative breast cancer")]
+# markers = pd.concat([markers_1,markers_2])
+markers = marker_utils.tissue_type(markers,Tissue Type) 
+markers = marker_utils.cancer_type(markers,Cancer Type)
+
 marker_matrix = marker_utils.matrix_creation(markers, "cell_name")
 marker_matrix = marker_matrix[marker_matrix.sum(axis=1) > 4]
 
