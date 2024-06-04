@@ -1,5 +1,5 @@
 # Stochastic Cancer
-This set of coddes complements the work "Signatures of cancer cells defined by single-cell gene expression patterns of gene families" (unpublished).  
+This set of coddes complements the work "Gene choice in cancer cells is exclusive in ion transport but concurrent in DNA replication" (unpublished).  
   
 1. [Introduction](#introduction)  
 2. [Dependencies](#dependencies) 
