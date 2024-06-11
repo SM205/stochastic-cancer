@@ -1,5 +1,5 @@
 # Stochastic Cancer
-This set of coddes complements the work "Gene choice in cancer cells is exclusive in ion transport but concurrent in DNA replication" (unpublished).  
+This set of coddes complements the work "[Gene choice in cancer cells is exclusive in ion transport but concurrent in DNA replication](https://doi.org/10.1016/j.csbj.2024.06.004)".
   
 1. [Introduction](#introduction)  
 2. [Dependencies](#dependencies) 
