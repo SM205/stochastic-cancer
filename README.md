@@ -1,5 +1,5 @@
 # Stochastic Cancer
-This set of coddes complements the work "[Gene choice in cancer cells is exclusive in ion transport but concurrent in DNA replication](https://doi.org/10.1016/j.csbj.2024.06.004)".
+This set of codes complements the work "[Gene choice in cancer cells is exclusive in ion transport but concurrent in DNA replication](https://doi.org/10.1016/j.csbj.2024.06.004)".
   
 1. [Introduction](#introduction)  
 2. [Dependencies](#dependencies) 
@@ -29,7 +29,7 @@ Different parts of the project were implemented as either standalone python scri
 
 Only scripts thought to be imperative for carrying out the analyses mentioned in the methods section have been provided. (scripts used to generate some of the figures have not been provided, but can be provided if required)
 
-The following documentation describes all the components in roughly the order in which it occurs in the methods. For the details on the methods and the project itself see the article [pending]().
+The following documentation describes all the components in roughly the order in which it occurs in the methods. For the details on the methods and the project itself see the [article](https://www.csbj.org/article/S2001-0370(24)00202-2/fulltext).
    
 # Dependencies
 
